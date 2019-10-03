@@ -999,5 +999,29 @@ namespace BuildXL.Processes.Tracing
             long pipSemiStableHash,
             string pipDescription,
             string path);
+
+        [GeneratedEvent(
+            (int)LogEventId.MarkingSharedOpaqueOutput,
+            EventGenerators = EventGenerators.LocalOnly,
+            EventLevel = Level.Verbose,
+            Keywords = (int)Keywords.UserMessage,
+            EventTask = (int)Tasks.PipExecutor,
+            Message = "Marking '{path}' as shared opaque output: {stack}")]
+        public abstract void MarkingSharedOpaqueOutput(
+            LoggingContext context,
+            string path,
+            string stack);
+
+        [GeneratedEvent(
+            (int)LogEventId.MarkingSharedOpaqueOutputOutcome,
+            EventGenerators = EventGenerators.LocalOnly,
+            EventLevel = Level.Verbose,
+            Keywords = (int)Keywords.UserMessage,
+            EventTask = (int)Tasks.PipExecutor,
+            Message = "Marking '{path}' succeeded: {succeeded}")]
+        public abstract void MarkingSharedOpaqueOutputOutcome(
+            LoggingContext context,
+            string path,
+            bool succeeded);
     }
 }

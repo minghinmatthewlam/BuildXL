@@ -5,6 +5,7 @@ using System;
 using System.Security.AccessControl;
 using BuildXL.Native.IO;
 using BuildXL.Utilities;
+using BuildXL.Utilities.Instrumentation.Common;
 using static BuildXL.Utilities.FormattableStringEx;
 
 namespace BuildXL.Processes
@@ -18,12 +19,15 @@ namespace BuildXL.Processes
         /// Flags the given path as being an output under a shared opaque by setting the creation time to <see cref="WellKnownTimestamps.OutputInSharedOpaqueTimestamp"/>
         /// </summary>
         /// <exception cref="BuildXLException">When the timestamp cannot be set</exception>
-        public static void SetPathAsSharedOpaqueOutput(string expandedPath)
+        public static void SetPathAsSharedOpaqueOutput(LoggingContext lc, string expandedPath)
         {
             try
             {
                 // Only the creation time is used to identify a file as the output of a shared opaque
+                var stack = Environment.StackTrace;
+                Tracing.Logger.Log.MarkingSharedOpaqueOutput(lc, expandedPath, stack.Substring(0, Math.Min(300, stack.Length)));
                 FileUtilities.SetFileTimestamps(expandedPath, new FileTimestamps(WellKnownTimestamps.OutputInSharedOpaqueTimestamp));
+                Tracing.Logger.Log.MarkingSharedOpaqueOutputOutcome(lc, expandedPath, IsSharedOpaqueOutput(expandedPath));
             }
             catch (BuildXLException ex)
             {
@@ -91,7 +95,7 @@ namespace BuildXL.Processes
         /// <summary>
         /// Makes sure the given path is flagged as being an output under a shared opaque. Flags the file as such if that was not the case.
         /// </summary>
-        public static void EnforceFileIsSharedOpaqueOutput(string expandedPath)
+        public static void EnforceFileIsSharedOpaqueOutput(LoggingContext lc, string expandedPath)
         {
             // If the file has the right timestamps already, then there is nothing to do.
             if (IsSharedOpaqueOutput(expandedPath))
@@ -112,7 +116,7 @@ namespace BuildXL.Processes
 #endif
             try
             {
-                SetPathAsSharedOpaqueOutput(expandedPath);
+                SetPathAsSharedOpaqueOutput(lc, expandedPath);
             }
             finally
             {

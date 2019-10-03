@@ -3750,7 +3750,7 @@ namespace BuildXL.Scheduler
                     foreach (AbsolutePath writeInPath in writesPerSharedOpaque)
                     {
                         var path = writeInPath.ToString(environment.Context.PathTable);
-                        SharedOpaqueOutputHelper.EnforceFileIsSharedOpaqueOutput(path);
+                        SharedOpaqueOutputHelper.EnforceFileIsSharedOpaqueOutput(m_loggingContext, path);
                         outputPaths.Add(path);
                     }
                 }
@@ -5696,7 +5696,7 @@ namespace BuildXL.Scheduler
         {
             if (IsPathUnderSharedOpaqueDirectory(path))
             {
-                SharedOpaqueOutputHelper.EnforceFileIsSharedOpaqueOutput(path.ToString(Context.PathTable));
+                SharedOpaqueOutputHelper.EnforceFileIsSharedOpaqueOutput(m_loggingContext, path.ToString(Context.PathTable));
                 return true;
             }
 

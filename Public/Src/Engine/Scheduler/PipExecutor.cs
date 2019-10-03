@@ -448,7 +448,7 @@ namespace BuildXL.Scheduler
             // otherwise it will get marked in ReportFileArtifactPlaced.
             if (!environment.Configuration.Schedule.StoreOutputsToCache)
             {
-                MakeSharedOpaqueOutputIfNeeded(environment, copyFile.Destination);
+                MakeSharedOpaqueOutputIfNeeded(operationContext, environment, copyFile.Destination);
             }
 
             var mayBeTracked = await TrackPipOutputAsync(operationContext, environment, copyFile.Destination, isSymlink: false);
@@ -695,12 +695,12 @@ namespace BuildXL.Scheduler
             }
         }
 
-        private static void MakeSharedOpaqueOutputIfNeeded(IPipExecutionEnvironment environment, AbsolutePath path)
+        private static void MakeSharedOpaqueOutputIfNeeded(LoggingContext lc, IPipExecutionEnvironment environment, AbsolutePath path)
         {
             if (environment.PipGraphView.IsPathUnderOutputDirectory(path, out bool isItSharedOpaque) && isItSharedOpaque)
             {
                 string expandedPath = path.ToString(environment.Context.PathTable);
-                SharedOpaqueOutputHelper.EnforceFileIsSharedOpaqueOutput(expandedPath);
+                SharedOpaqueOutputHelper.EnforceFileIsSharedOpaqueOutput(lc, expandedPath);
             }
         }
 
@@ -834,7 +834,7 @@ namespace BuildXL.Scheduler
                     }
                 }
 
-                MakeSharedOpaqueOutputIfNeeded(environment, destinationFile.Path);
+                MakeSharedOpaqueOutputIfNeeded(operationContext, environment, destinationFile.Path);
 
                 return outputOrigin.ToPipResult();
             }
