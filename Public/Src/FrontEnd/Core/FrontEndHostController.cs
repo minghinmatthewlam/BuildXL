@@ -120,7 +120,6 @@ namespace BuildXL.FrontEnd.Core
         /// </summary>
         public FrontEndHostController(
             FrontEndFactory frontEndFactory,
-            DScriptWorkspaceResolverFactory workspaceResolverFactory,
             EvaluationScheduler evaluationScheduler,
             IModuleRegistry moduleRegistry,
             IFrontEndStatistics frontEndStatistics,
@@ -138,7 +137,6 @@ namespace BuildXL.FrontEnd.Core
 
             // Temporary initialization
             m_frontEndFactory = frontEndFactory;
-            m_workspaceResolverFactory = workspaceResolverFactory;
             m_evaluationScheduler = evaluationScheduler;
             ModuleRegistry = moduleRegistry;
             m_frontEndStatistics = frontEndStatistics;
@@ -362,6 +360,8 @@ namespace BuildXL.FrontEnd.Core
                 return false;
             }
 
+            QualifiersToEvaluate = qualifiersToEvaluate;
+
             // Frontend and resolver initialization happens before any other phase. Frontend initialization should happen before any 
             // access to the workspace resolver factory: a frontend may trigger a workspace resolver creation with a particular setting.
             // TODO: during workspace construction the workspace resolver factory is accessed directly, which is wrong from an architecture
@@ -374,7 +374,7 @@ namespace BuildXL.FrontEnd.Core
                 delegate(LoggingContext nestedLoggingContext, ref InitializeResolversStatistics statistics)
                 {
                     // TODO: Use nestedLoggingContext for resolver errors
-                    var success = TryInitializeFrontEndsAndResolvers(configuration, qualifiersToEvaluate).GetAwaiter().GetResult();
+                    var success = TryInitializeFrontEndsAndResolvers(configuration).GetAwaiter().GetResult();
 
                     statistics.ResolverCount = success ? m_resolvers.Length : 0;
 
@@ -392,7 +392,7 @@ namespace BuildXL.FrontEnd.Core
                 m_logger.FrontEndBuildWorkspacePhaseComplete,
                 delegate(LoggingContext nestedLoggingContext, ref WorkspaceStatistics statistics)
                 {
-                    Workspace = DoPhaseBuildWorkspace(configuration, engineAbstraction, evaluationFilter, qualifiersToEvaluate);
+                    Workspace = DoPhaseBuildWorkspace(configuration, engineAbstraction, evaluationFilter);
 
                     statistics.ProjectCount = Workspace.SpecCount;
                     statistics.ModuleCount = Workspace.ModuleCount;
@@ -1078,7 +1078,6 @@ namespace BuildXL.FrontEnd.Core
 
             var frontEndHost = new FrontEndHostController(
                 frontEndFactory,
-                new DScriptWorkspaceResolverFactory(),
                 new EvaluationScheduler(degreeOfParallelism: 1, false, cancellationToken: frontEndContext.CancellationToken),
                 moduleRegistry,
                 new FrontEndStatistics(),
@@ -1109,7 +1108,7 @@ namespace BuildXL.FrontEnd.Core
         /// <summary>
         /// Initializes front-ends.
         /// </summary>
-        public async Task<bool> TryInitializeFrontEndsAndResolvers(IConfiguration configuration, QualifierId[] requestedQualifiers)
+        public async Task<bool> TryInitializeFrontEndsAndResolvers(IConfiguration configuration)
         {
             Contract.Requires(configuration != null);
             Contract.Requires(HostState == State.ConfigInterpreted);
@@ -1121,17 +1120,7 @@ namespace BuildXL.FrontEnd.Core
                 return false;
             }
 
-            // Most resolvers will ensure the workspaceresolverfactory is initialized, so do that here.
-            // The factory context may be not set if the controller is not using the workspace, so we set that here
-            if (!m_workspaceResolverFactory.IsInitialized)
-            {
-                m_workspaceResolverFactory.Initialize(FrontEndContext, this, configuration, requestedQualifiers);
-            }
-
-            foreach (IFrontEnd frontEnd in m_frontEndFactory.RegisteredFrontEnds)
-            {
-                frontEnd.InitializeFrontEnd(this, FrontEndContext, configuration);
-            }
+            m_frontEndFactory.InitializeFrontEnds(this, FrontEndContext, configuration);
 
             // For each resolver settings, tries to find a front end for it.
             var resolvers = new List<IResolver>(resolverConfigurations.Count);
@@ -1146,18 +1135,17 @@ namespace BuildXL.FrontEnd.Core
                     return false;
                 }
 
-                // We ask the front end we found to create a resolver to handle the settings
                 var resolver = frontEndInstance.CreateResolver(resolverConfiguration.Kind);
 
-                var maybeWorkspaceResolver = m_workspaceResolverFactory.TryGetResolver(resolverConfiguration);
-                if (!maybeWorkspaceResolver.Succeeded)
+                // We ask the frontend we found to create a workspace resolver and a resolver to handle the settings
+                if (!frontEndInstance.TryCreateWorkspaceResolver(resolverConfiguration, out var workspaceResolver))
                 {
                     // Error should have been reported.
                     return false;
                 }
 
                 resolvers.Add(resolver);
-                initResolverTasks[i] = resolver.InitResolverAsync(resolverConfiguration, maybeWorkspaceResolver.Result);
+                initResolverTasks[i] = resolver.InitResolverAsync(resolverConfiguration, workspaceResolver);
             }
 
             var results = await TaskUtilities.SafeWhenAll(initResolverTasks);
@@ -1173,7 +1161,7 @@ namespace BuildXL.FrontEnd.Core
         }
 
         /// <summary>
-        /// An alternative to <see cref="TryInitializeFrontEndsAndResolvers(IConfiguration, QualifierId[])"/> used for testing.  Instead
+        /// An alternative to <see cref="TryInitializeFrontEndsAndResolvers(IConfiguration)"/> used for testing.  Instead
         /// of taking and parsing a config object, this method directly takes a list of resolvers.
         /// </summary>
         internal void InitializeResolvers(IEnumerable<IResolver> resolvers)
@@ -1185,28 +1173,25 @@ namespace BuildXL.FrontEnd.Core
         /// <summary>
         /// Returns a <see cref="IWorkspaceProvider"/> responsible for <see cref="Workspace"/> computation.
         /// </summary>
-        internal bool TryGetWorkspaceProvider(IConfiguration configuration, QualifierId[] requestedQualifiers, out IWorkspaceProvider workspaceProvider, out IEnumerable<Failure> failures)
+        internal bool TryGetWorkspaceProvider(IConfiguration configuration, out IWorkspaceProvider workspaceProvider, out IEnumerable<Failure> failures)
         {
             var workspaceConfiguration = GetWorkspaceConfiguration(configuration);
-
-            // This is the point where we have all the objects we need to complete setting up the workspace factory
-            if (!m_workspaceResolverFactory.IsInitialized)
-            {
-                m_workspaceResolverFactory.Initialize(FrontEndContext, this, configuration, requestedQualifiers);
-            }
 
             return TryGetWorkspaceProvider(workspaceConfiguration, out workspaceProvider, out failures);
         }
 
-        private bool TryGetWorkspaceProvider(WorkspaceConfiguration workspaceConfiguration, out IWorkspaceProvider workspaceProvider, out IEnumerable<Failure> failures)
+        private bool TryGetWorkspaceProvider(
+            WorkspaceConfiguration workspaceConfiguration, 
+            out IWorkspaceProvider workspaceProvider, 
+            out IEnumerable<Failure> failures)
         {
             return WorkspaceProvider.TryCreate(
                 GetMainConfigWorkspace(),
                 m_frontEndStatistics,
-                m_workspaceResolverFactory,
-                workspaceConfiguration,
+                m_frontEndFactory,
                 FrontEndContext.PathTable,
                 FrontEndContext.SymbolTable,
+                workspaceConfiguration,
                 useDecorator: true,
                 addBuiltInPreludeResolver: true,
                 workspaceProvider: out workspaceProvider,

@@ -17,6 +17,7 @@ using BuildXL.Cache.ContentStore.Hashing;
 using BuildXL.Cache.ContentStore.Interfaces.Distributed;
 using BuildXL.Cache.ContentStore.Interfaces.Extensions;
 using BuildXL.Cache.ContentStore.Interfaces.FileSystem;
+using BuildXL.Cache.ContentStore.Interfaces.Logging;
 using BuildXL.Cache.ContentStore.Interfaces.Results;
 using BuildXL.Cache.ContentStore.Interfaces.Sessions;
 using BuildXL.Cache.ContentStore.Interfaces.Tracing;
@@ -273,6 +274,8 @@ namespace BuildXL.Cache.ContentStore.Distributed.Sessions
             // Next try the pin cache
             if (_pinCache?.TryPinFromCachedResult(contentHash).Succeeded == true)
             {
+                Tracer.Info(operationContext, $"Pin succeeded for {contentHash.ToShortString()}: satisfied from cache.");
+
                 return PinResult.Success;
             }
 
@@ -778,16 +781,37 @@ namespace BuildXL.Cache.ContentStore.Distributed.Sessions
 
                 if (bytes != null && putResult.Succeeded)
                 {
-                    // Fire and forget since this step is optional.
-                    // Since the rest of the operation is done asynchronously, create new context to stop cancelling operation prematurely.
-                    WithOperationContext(
-                        context,
-                        CancellationToken.None,
-                        opContext => ContentLocationStore.PutBlobAsync(opContext, putResult.ContentHash, bytes)
-                        ).FireAndForget(context);
+                    await PutBlobAsync(operationContext, putResult.ContentHash, bytes);
                 }
 
                 return putResult;
+            }
+        }
+
+        /// <summary>
+        /// Puts a given blob into redis (either inline or not depending on the settings).
+        /// </summary>
+        /// <remarks>
+        /// This method won't fail, because all the errors are traced and swallowed.
+        /// </remarks>
+        protected async Task PutBlobAsync(OperationContext context, ContentHash contentHash, byte[] bytes)
+        {
+            if (Settings.InlinePutBlobs)
+            {
+                // Failures already traced. No need to trace it here one more time.
+                await ContentLocationStore.PutBlobAsync(context, contentHash, bytes).IgnoreFailure();
+            }
+            else
+            {
+                // Fire and forget since this step is optional.
+                // Since the rest of the operation is done asynchronously, create new context to stop cancelling operation prematurely.
+                WithOperationContext(
+                        context,
+                        CancellationToken.None,
+                        opContext => ContentLocationStore.PutBlobAsync(opContext, contentHash, bytes)
+                    )
+                    // Tracing unhandled errors only because normal failures already traced by the operation provider.
+                    .TraceIfFailure(context, failureSeverity: Severity.Debug, traceTaskExceptionsOnly: true, operation: "PutBlobAsync");
             }
         }
 
@@ -1100,7 +1124,7 @@ namespace BuildXL.Cache.ContentStore.Distributed.Sessions
             minVerifiedCount = (int)Math.Ceiling(lnRisk / lnVerifiedRisk);
             minUnverifiedCount = (int)Math.Ceiling(lnRisk / lnUnverifiedRisk);
 
-            if (_pinCache == null || Settings.PinConfiguration.PinCacheReplicaCreditRetentionMinutes <= 0)
+            if (_pinCache == null || Settings.PinConfiguration.PinCachePerReplicaRetentionCreditMinutes <= 0)
             {
                 pinCacheTimeToLive = TimeSpan.Zero;
             }
@@ -1109,11 +1133,11 @@ namespace BuildXL.Cache.ContentStore.Distributed.Sessions
                 // Pin cache time to live is:
                 // r * (1 + d + d^2 + ... + d^n-1) = r * (1 - d^n) / (1 - d)
                 // where
-                // r = PinCacheReplicaCreditRetentionMinutes
-                // d = PinCacheReplicaCreditRetentionDecay
+                // r = PinCachePerReplicaRetentionCreditMinutes
+                // d = PinCacheReplicaCreditRetentionFactor
                 // n = replica count
-                var decay = Settings.PinConfiguration.PinCacheReplicaCreditRetentionDecay;
-                var pinCacheTimeToLiveMinutes = Settings.PinConfiguration.PinCacheReplicaCreditRetentionMinutes * (1 - Math.Pow(decay, remote.Locations.Count)) / (1 - decay);
+                var decay = Settings.PinConfiguration.PinCacheReplicaCreditRetentionFactor;
+                var pinCacheTimeToLiveMinutes = Settings.PinConfiguration.PinCachePerReplicaRetentionCreditMinutes * (1 - Math.Pow(decay, remote.Locations.Count)) / (1 - decay);
                 pinCacheTimeToLive = TimeSpan.FromMinutes(pinCacheTimeToLiveMinutes);
             }
         }
