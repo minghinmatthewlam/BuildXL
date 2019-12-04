@@ -1017,6 +1017,22 @@ namespace BuildXL.Cache.ContentStore.Distributed.NuCache
                 extraEndMessage: _ => extraMessage);
         }
 
+        public Task<BoolResult> DeleteAsync(OperationContext context, ContentHash contentHash)
+        {
+            Contract.Assert(contentHash != null);
+
+            return context.PerformOperation(
+                Tracer,
+                async () =>
+                {
+                    EventStore.Delete(contentHash, LocalMachineId, _clock.UtcNow).ThrowIfFailure();
+
+                    return BoolResult.Success;
+                }
+            );
+            
+        }
+
         /// <nodoc />
         public async Task<BoolResult> TouchBulkAsync(OperationContext context, IReadOnlyList<ContentHash> contentHashes)
         {

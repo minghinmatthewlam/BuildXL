@@ -583,9 +583,60 @@ namespace BuildXL.Cache.ContentStore.Distributed.Stores
         }
 
         /// <inheritdoc />
-        public Task<DeleteResult> DeleteAsync(Context context, ContentHash contentHash)
+        public async Task<DeleteResult> DeleteAsync(Context context, ContentHash contentHash)
         {
-            throw new NotImplementedException();
+            /* //TODO: might need to check if tcs.IsLocalLocationStoreEnabled is true
+
+             var result = await InnerContentStore.DeleteAsync(context, contentHash);
+             if (!result)
+             {
+                 return result;
+             }
+
+             var registerResult = await _contentLocationStore.DeleteAsync(context, contentHash);
+             if (!registerResult)
+             {
+                 return registerResult;
+
+
+             return result;*/
+
+            var deleteResult = await InnerContentStore.DeleteAsync(context, contentHash);
+            if (!deleteResult)
+            {
+                return deleteResult;
+            }
+
+            return deleteResult;
+
+            /*var unregisterResult = await UnregisterAsync(context, new List<ContentHash>() {contentHash}, CancellationToken.None);
+            if (!unregisterResult)
+            {
+                return new DeleteResult(unregisterResult, $"Error deleting hash: {contentHash}, context: {context}");
+            }
+
+            if (_contentLocationStore is TransitioningContentLocationStore tcs && tcs.IsLocalLocationStoreEnabled)
+            {
+                var contentHashes = new List<ContentHash>()
+                                                {
+                                                    contentHash
+                                                };
+                var result = await tcs.GetBulkAsync(context, contentHashes, CancellationToken.None, UrgencyHint.Nominal, GetBulkOrigin.Local);
+                if (!result)
+                {
+                    return new DeleteResult(result, $"Error in GetBulkAsync for hash: {contentHash}, context: {context}");
+                }
+
+                if (result.ContentHashesInfo.Count == 1)
+                {
+                    var contentHashInfo = result.ContentHashesInfo.ElementAt(0);
+                    foreach (MachineLocation curMachine : contentHashInfo.Locations)
+                    {
+
+                    }
+                }
+            }*/
+
         }
 
         /// <inheritdoc />
